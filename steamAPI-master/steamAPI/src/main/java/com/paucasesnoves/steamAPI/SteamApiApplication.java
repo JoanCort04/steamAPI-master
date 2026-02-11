@@ -11,3 +11,5 @@ public class SteamApiApplication {
 	}
 
 }
+git add .
+git commit -m "Save all work before force push"
