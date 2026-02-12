@@ -7,15 +7,20 @@ import com.paucasesnoves.steamAPI.modules.csv.dto.CsvImportStatisticsDto;
 import com.paucasesnoves.steamAPI.modules.csv.dto.GameCsvRecord;
 import com.paucasesnoves.steamAPI.modules.games.domain.*;
 import com.paucasesnoves.steamAPI.modules.games.repository.*;
+import com.paucasesnoves.steamAPI.utils.CsvUtils;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,44 +28,52 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class GameCsvImporter {
 
-    @Autowired
-    private GameRepository gameRepo;
-    @Autowired
-    private DeveloperRepository developerRepo;
-    @Autowired
-    private PublisherRepository publisherRepo;
-    @Autowired
-    private PlatformRepository platformRepo;
-    @Autowired
-    private CategoryRepository categoryRepo;
-    @Autowired
-    private GenreRepository genreRepo;
-
-    @PersistenceContext
-    private EntityManager entityManager;
-
+    private static final Logger log = LoggerFactory.getLogger(GameCsvImporter.class);
     private static final int BATCH_SIZE = 1000;
-    private static final int CACHE_CLEAN_INTERVAL = 5000;
 
-    // Caches
-    private final Map<String, Developer> developerCache = new ConcurrentHashMap<>();
-    private final Map<String, Publisher> publisherCache = new ConcurrentHashMap<>();
-    private final Map<String, Platform> platformCache = new ConcurrentHashMap<>();
-    private final Map<String, Category> categoryCache = new ConcurrentHashMap<>();
-    private final Map<String, Genre> genreCache = new ConcurrentHashMap<>();
+    @Autowired private GameRepository gameRepo;
+    @Autowired private DeveloperRepository developerRepo;
+    @Autowired private PublisherRepository publisherRepo;
+    @Autowired private PlatformRepository platformRepo;
+    @Autowired private CategoryRepository categoryRepo;
+    @Autowired private GenreRepository genreRepo;
+    @Autowired private TransactionTemplate transactionTemplate;
+    @PersistenceContext private EntityManager entityManager;
 
-    @Transactional
-    public CsvImportStatisticsDto importCsv(InputStream inputStream) throws Exception {
+    public CsvImportStatisticsDto importCsv(InputStream inputStream) {
         long startTime = System.currentTimeMillis();
         CsvImportStatisticsDto stats = new CsvImportStatisticsDto();
-        clearAllCaches();
 
-        System.out.println("🚀 INICIANDO IMPORTACIÓN DE JUEGOS (Mapeo por columnas) 🚀");
+        // =================================================================
+        // 1. PRECARGAR TODAS LAS ENTIDADES EXISTENTES (CACHÉS INMUTABLES DURANTE LA IMPORTACIÓN)
+        // =================================================================
+        Set<Long> existingGameAppIds = CsvUtils.buildExistenceCache(gameRepo.findAll(), Game::getAppId);
+        log.info("📦 Juegos existentes: {} IDs", existingGameAppIds.size());
 
-        try (InputStreamReader reader = new InputStreamReader(inputStream, "UTF-8")) {
+        Map<String, Developer> developerCache = CsvUtils.buildEntityCache(developerRepo.findAll(), Developer::getName);
+        Map<String, Publisher> publisherCache = CsvUtils.buildEntityCache(publisherRepo.findAll(), Publisher::getName);
+        Map<String, Platform> platformCache = CsvUtils.buildEntityCache(platformRepo.findAll(), Platform::getName);
+        Map<String, Category> categoryCache = CsvUtils.buildEntityCache(categoryRepo.findAll(), Category::getName);
+        Map<String, Genre> genreCache = CsvUtils.buildEntityCache(genreRepo.findAll(), Genre::getName);
 
-            HeaderColumnNameMappingStrategy<GameCsvRecord> strategy =
-                    new HeaderColumnNameMappingStrategy<>();
+        // Convertir los mapas a ConcurrentHashMap para permitir modificaciones seguras
+        Map<String, Developer> developerCacheConcurrent = new ConcurrentHashMap<>(developerCache);
+        Map<String, Publisher> publisherCacheConcurrent = new ConcurrentHashMap<>(publisherCache);
+        Map<String, Platform> platformCacheConcurrent = new ConcurrentHashMap<>(platformCache);
+        Map<String, Category> categoryCacheConcurrent = new ConcurrentHashMap<>(categoryCache);
+        Map<String, Genre> genreCacheConcurrent = new ConcurrentHashMap<>(genreCache);
+
+        log.info("📦 Cachés cargadas: Devs={}, Publishers={}, Platforms={}, Cats={}, Genres={}",
+                developerCacheConcurrent.size(), publisherCacheConcurrent.size(),
+                platformCacheConcurrent.size(), categoryCacheConcurrent.size(),
+                genreCacheConcurrent.size());
+
+        // =================================================================
+        // 2. LEER CSV
+        // =================================================================
+        try (InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8)) {
+
+            HeaderColumnNameMappingStrategy<GameCsvRecord> strategy = new HeaderColumnNameMappingStrategy<>();
             strategy.setType(GameCsvRecord.class);
 
             CsvToBean<GameCsvRecord> csvToBean = new CsvToBeanBuilder<GameCsvRecord>(reader)
@@ -72,462 +85,282 @@ public class GameCsvImporter {
 
             List<GameCsvRecord> records = csvToBean.parse();
             stats.setProcessed(records.size());
+            log.info("📄 Registros leídos: {}", String.format("%,d", records.size()));
 
-            System.out.printf("📄 Total de registros leídos: %,d%n", records.size());
-
-            // Verificar que se leyeron registros
             if (records.isEmpty()) {
-                System.out.println("⚠️  No se encontraron registros en el CSV");
+                log.warn("⚠️ CSV vacío");
                 return stats;
             }
 
-            // Mostrar información de las columnas del primer registro
-            if (!records.isEmpty()) {
-                System.out.println("📋 Ejemplo de primer registro leído:");
-                GameCsvRecord firstRecord = records.get(0);
-                System.out.printf("  appid: %s, name: %s%n",
-                        firstRecord.getAppId(),
-                        firstRecord.getTitle());
-            }
+            // Debug: primer registro
+            GameCsvRecord first = records.get(0);
+            log.debug("Ejemplo: appId={}, title={}", first.getAppId(), first.getTitle());
 
             List<Game> gamesBatch = new ArrayList<>(BATCH_SIZE);
 
             for (int i = 0; i < records.size(); i++) {
                 GameCsvRecord record = records.get(i);
+                int lineNumber = i + 2;
 
                 try {
-                    // Validar registro mínimo
-                    if (record.getAppId() == null || record.getAppId().trim().isEmpty()) {
-                        stats.incrementSkipped();
-                        continue;
-                    }
-
-                    // Parsear appId
-                    Long appId = parseAppId(record.getAppId());
+                    // ---- AppId ----
+                    Long appId = CsvUtils.parseLong(record.getAppId()).orElse(null);
                     if (appId == null) {
-                        System.err.printf("⚠️  Línea %d: appId inválido: %s%n",
-                                i + 2, record.getAppId()); // +2 para contar header
+                        log.warn("⚠️ Línea {}: appId inválido '{}'", lineNumber, record.getAppId());
                         stats.incrementSkipped();
                         continue;
                     }
 
-                    // Verificar si ya existe
-                    if (gameRepo.existsByAppId(appId)) {
+                    // ---- Juego ya existe? ----
+                    if (existingGameAppIds.contains(appId)) {
                         if (stats.getSkipped() % 1000 == 0) {
-                            System.out.printf("⏭️  Juego %d ya existe, saltando...%n", appId);
+                            log.debug("⏭️ Juego {} ya existe, saltando", appId);
                         }
                         stats.incrementSkipped();
                         continue;
                     }
 
-                    // Crear juego desde el record
+                    // ---- Crear Game ----
                     Game game = createGameFromRecord(record, appId);
 
-                    // Procesar relaciones
-                    processGameRelations(game, record, stats);
+                    // ---- Procesar relaciones con cachés CONCURRENTES ----
+                    processGameRelations(game, record, stats,
+                            developerCacheConcurrent, publisherCacheConcurrent,
+                            platformCacheConcurrent, categoryCacheConcurrent,
+                            genreCacheConcurrent);
 
                     gamesBatch.add(game);
                     stats.incrementCreated();
 
-                    // Mostrar progreso
-                    if (stats.getCreated() % 1000 == 0) {
-                        System.out.printf("✅ %,d juegos creados...%n", stats.getCreated());
+                    if (gamesBatch.size() >= BATCH_SIZE) {
+                        saveBatchInTransaction(gamesBatch, stats);
+                        gamesBatch.clear();
                     }
 
-                    // Guardar batch
-                    if (gamesBatch.size() >= BATCH_SIZE) {
-                        saveBatch(gamesBatch, stats);
-                        gamesBatch.clear();
-
-                        // Limpiar entity manager
-                        entityManager.flush();
-                        entityManager.clear();
-
-                        // Limpiar caches periódicamente
-                        if (stats.getCreated() % CACHE_CLEAN_INTERVAL == 0) {
-                            clearCaches();
-                            System.out.println("🧹 Caches limpiados");
-                        }
+                    if (stats.getCreated() % 5000 == 0) {
+                        log.info("✅ {} juegos creados...", String.format("%,d", stats.getCreated()));
                     }
 
                 } catch (Exception e) {
+                    log.warn("❌ Error línea {}: {}", lineNumber, e.getMessage());
+                    if (i < 5) log.debug("Detalle", e);
                     stats.incrementSkipped();
-                    System.err.printf("❌ Error procesando línea %d: %s%n",
-                            i + 2, e.getMessage());
-                    // Log detallado solo para los primeros errores
-                    if (i < 5) {
-                        e.printStackTrace();
-                    }
                 }
             }
 
-            // Guardar batch final
+            // ---- Guardar último lote ----
             if (!gamesBatch.isEmpty()) {
-                saveBatch(gamesBatch, stats);
+                saveBatchInTransaction(gamesBatch, stats);
             }
 
-            // Estadísticas finales
-            printFinalStatistics(stats, startTime);
+            // ---- Estadísticas finales ----
+            CsvUtils.logFinalStatistics(stats, startTime, "Juegos");
 
         } catch (Exception e) {
-            System.err.println("❌ Error crítico durante la importación: " + e.getMessage());
-            e.printStackTrace();
-            throw e;
-        } finally {
-            clearAllCaches();
-            entityManager.clear();
+            log.error("❌ Error crítico en importación de juegos", e);
+            throw new RuntimeException("Falló importación de juegos", e);
         }
 
         return stats;
     }
 
-    private Long parseAppId(String appIdStr) {
-        if (appIdStr == null || appIdStr.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.parseLong(appIdStr.trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     private Game createGameFromRecord(GameCsvRecord record, Long appId) {
         Game game = new Game();
         game.setAppId(appId);
-
-        // Título
-        if (record.getTitle() != null && !record.getTitle().trim().isEmpty()) {
-            game.setTitle(record.getTitle().trim());
-        } else {
-            game.setTitle("Unknown Title - " + appId);
-        }
-
-        // Fecha de lanzamiento
-        if (record.getReleaseDate() != null) {
-            game.setReleaseDate(record.getReleaseDate());
-        } else {
-            game.setReleaseDate(LocalDate.of(2000, 1, 1));
-        }
-
-        // Inglés
+        game.setTitle(Optional.ofNullable(record.getTitle())
+                .filter(t -> !t.isBlank())
+                .map(String::trim)
+                .orElse("Unknown Title - " + appId));
+        game.setReleaseDate(Optional.ofNullable(record.getReleaseDate())
+                .orElse(LocalDate.of(2000, 1, 1)));
         game.setEnglish("1".equals(record.getEnglish()));
+        game.setMinAge(CsvUtils.parseInt(record.getRequiredAge()).orElse(0));
+        game.setAchievements(CsvUtils.parseInt(record.getAchievements()).orElse(0));
+        game.setPositiveRatings(CsvUtils.parseInt(record.getPositiveRatings()).orElse(0));
+        game.setNegativeRatings(CsvUtils.parseInt(record.getNegativeRatings()).orElse(0));
+        game.setAvgPlaytime(CsvUtils.parseDouble(record.getAveragePlaytime()).orElse(0.0));
+        game.setMedianPlaytime(CsvUtils.parseDouble(record.getMedianPlaytime()).orElse(0.0));
 
-        // Edad mínima
-        game.setMinAge(parseIntSafe(record.getRequiredAge(), 0));
+        CsvUtils.OwnersRange owners = CsvUtils.parseOwners(record.getOwners());
+        game.setOwnersLower(owners.lower());
+        game.setOwnersUpper(owners.upper());
+        game.setOwnersMid(owners.mid());
 
-        // Logros
-        game.setAchievements(parseIntSafe(record.getAchievements(), 0));
-
-        // Calificaciones
-        game.setPositiveRatings(parseIntSafe(record.getPositiveRatings(), 0));
-        game.setNegativeRatings(parseIntSafe(record.getNegativeRatings(), 0));
-
-        // Tiempo de juego
-        game.setAvgPlaytime(parseDoubleSafe(record.getAveragePlaytime(), 0.0));
-        game.setMedianPlaytime(parseDoubleSafe(record.getMedianPlaytime(), 0.0));
-
-        // Propietarios
-        if (record.getOwners() != null && !record.getOwners().trim().isEmpty()) {
-            parseOwners(game, record.getOwners().trim());
-        } else {
-            game.setOwnersLower(0);
-            game.setOwnersUpper(0);
-            game.setOwnersMid(0);
-        }
-
-        // Precio
-        game.setPrice(parseBigDecimalSafe(record.getPrice(), BigDecimal.ZERO));
-
+        game.setPrice(parseBigDecimal(record.getPrice()));
         return game;
     }
 
-    private void parseOwners(Game game, String ownersStr) {
+    private BigDecimal parseBigDecimal(String value) {
+        if (value == null || value.isBlank()) return BigDecimal.ZERO;
         try {
-            if (ownersStr.contains("-")) {
-                String[] parts = ownersStr.split("-");
-                if (parts.length == 2) {
-                    int low = parseIntSafe(parts[0].trim(), 0);
-                    int high = parseIntSafe(parts[1].trim(), 0);
-                    game.setOwnersLower(low);
-                    game.setOwnersUpper(high);
-                    game.setOwnersMid((low + high) / 2);
-                } else {
-                    setDefaultOwners(game);
-                }
-            } else {
-                int val = parseIntSafe(ownersStr.trim(), 0);
-                game.setOwnersLower(val);
-                game.setOwnersUpper(val);
-                game.setOwnersMid(val);
-            }
-        } catch (Exception e) {
-            setDefaultOwners(game);
+            return new BigDecimal(value.trim());
+        } catch (NumberFormatException e) {
+            return BigDecimal.ZERO;
         }
     }
 
-    private void setDefaultOwners(Game game) {
-        game.setOwnersLower(0);
-        game.setOwnersUpper(0);
-        game.setOwnersMid(0);
-    }
+    private void processGameRelations(Game game,
+                                      GameCsvRecord record,
+                                      CsvImportStatisticsDto stats,
+                                      Map<String, Developer> developerCache,
+                                      Map<String, Publisher> publisherCache,
+                                      Map<String, Platform> platformCache,
+                                      Map<String, Category> categoryCache,
+                                      Map<String, Genre> genreCache) {
 
-    private void processGameRelations(Game game, GameCsvRecord record, CsvImportStatisticsDto stats) {
         // Desarrolladores
-        if (record.getDevelopers() != null && !record.getDevelopers().trim().isEmpty()) {
-            processMultiValueField(record.getDevelopers(), ";", name -> {
-                Developer dev = getOrCreateDeveloper(name, stats);
-                if (!game.getDevelopers().contains(dev)) {
-                    game.getDevelopers().add(dev);
-                }
+        if (record.getDevelopers() != null && !record.getDevelopers().isBlank()) {
+            processMultiValue(record.getDevelopers(), ";", name -> {
+                Developer dev = getOrCreateDeveloper(name, developerCache, stats);
+                if (!game.getDevelopers().contains(dev)) game.getDevelopers().add(dev);
             });
         }
 
         // Editores
-        if (record.getPublishers() != null && !record.getPublishers().trim().isEmpty()) {
-            processMultiValueField(record.getPublishers(), ";", name -> {
-                Publisher pub = getOrCreatePublisher(name, stats);
-                if (!game.getPublishers().contains(pub)) {
-                    game.getPublishers().add(pub);
-                }
+        if (record.getPublishers() != null && !record.getPublishers().isBlank()) {
+            processMultiValue(record.getPublishers(), ";", name -> {
+                Publisher pub = getOrCreatePublisher(name, publisherCache, stats);
+                if (!game.getPublishers().contains(pub)) game.getPublishers().add(pub);
             });
         }
 
         // Plataformas
-        if (record.getPlatforms() != null && !record.getPlatforms().trim().isEmpty()) {
-            processMultiValueField(record.getPlatforms(), ";", name -> {
-                Platform platform = getOrCreatePlatform(name, stats);
-                if (!game.getPlatforms().contains(platform)) {
-                    game.getPlatforms().add(platform);
-                }
+        if (record.getPlatforms() != null && !record.getPlatforms().isBlank()) {
+            processMultiValue(record.getPlatforms(), ";", name -> {
+                Platform plat = getOrCreatePlatform(name, platformCache, stats);
+                if (!game.getPlatforms().contains(plat)) game.getPlatforms().add(plat);
             });
         }
 
-        // Categoría (tomamos la primera)
-        if (record.getCategories() != null && !record.getCategories().trim().isEmpty()) {
-            String[] categories = record.getCategories().split(";");
-            if (categories.length > 0) {
-                String categoryName = categories[0].trim();
-                if (!categoryName.isEmpty()) {
-                    Category category = getOrCreateCategory(categoryName, stats);
-                    game.setCategory(category);
-                }
+        // Categoría (primera)
+        if (record.getCategories() != null && !record.getCategories().isBlank()) {
+            String[] cats = record.getCategories().split(";");
+            if (cats.length > 0 && !cats[0].trim().isEmpty()) {
+                Category cat = getOrCreateCategory(cats[0].trim(), categoryCache, stats);
+                game.setCategory(cat);
             }
         }
 
         // Géneros
-        if (record.getGenres() != null && !record.getGenres().trim().isEmpty()) {
-            processMultiValueField(record.getGenres(), ";", name -> {
-                Genre genre = getOrCreateGenre(name, stats);
-                if (!game.getGenres().contains(genre)) {
-                    game.getGenres().add(genre);
-                }
+        if (record.getGenres() != null && !record.getGenres().isBlank()) {
+            processMultiValue(record.getGenres(), ";", name -> {
+                Genre gen = getOrCreateGenre(name, genreCache, stats);
+                if (!game.getGenres().contains(gen)) game.getGenres().add(gen);
             });
         }
     }
 
-    private void processMultiValueField(String fieldValue, String delimiter,
-                                        java.util.function.Consumer<String> processor) {
-        String[] values = fieldValue.split(delimiter);
-        for (String value : values) {
-            String trimmed = value.trim();
-            if (!trimmed.isEmpty()) {
-                processor.accept(trimmed);
-            }
+    private void processMultiValue(String field, String delimiter, java.util.function.Consumer<String> consumer) {
+        for (String item : field.split(delimiter)) {
+            String trimmed = item.trim();
+            if (!trimmed.isEmpty()) consumer.accept(trimmed);
         }
     }
 
-    // Métodos helper para parsing seguro
-    private int parseIntSafe(String value, int defaultValue) {
-        if (value == null || value.trim().isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private double parseDoubleSafe(String value, double defaultValue) {
-        if (value == null || value.trim().isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return Double.parseDouble(value.trim());
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private BigDecimal parseBigDecimalSafe(String value, BigDecimal defaultValue) {
-        if (value == null || value.trim().isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return new BigDecimal(value.trim());
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    // Métodos getOrCreate (igual que antes, pero los incluyo por completitud)
-    private Developer getOrCreateDeveloper(String name, CsvImportStatisticsDto stats) {
-        return developerCache.computeIfAbsent(name, n -> {
+    // =================================================================
+    // MÉTODOS getOrCreate ESPECÍFICOS (con caché ConcurrentHashMap)
+    // =================================================================
+    private Developer getOrCreateDeveloper(String name, Map<String, Developer> cache, CsvImportStatisticsDto stats) {
+        return cache.computeIfAbsent(name, n -> {
+            // Buscar en BD por si acaso (aunque ya debería estar en caché si existía)
             Optional<Developer> existing = developerRepo.findByName(n);
             if (existing.isPresent()) {
                 return existing.get();
-            } else {
+            }
+            Developer dev = new Developer(n);
+            try {
+                Developer saved = developerRepo.save(dev);
                 stats.incrementDevelopersCreated();
-                return developerRepo.save(new Developer(n));
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                // Si ocurre duplicado (otro hilo insertó justo antes), recuperamos el existente
+                return developerRepo.findByName(n)
+                        .orElseThrow(() -> new RuntimeException("Error al crear desarrollador: " + n, e));
             }
         });
     }
 
-    private Publisher getOrCreatePublisher(String name, CsvImportStatisticsDto stats) {
-        return publisherCache.computeIfAbsent(name, n -> {
+    private Publisher getOrCreatePublisher(String name, Map<String, Publisher> cache, CsvImportStatisticsDto stats) {
+        return cache.computeIfAbsent(name, n -> {
             Optional<Publisher> existing = publisherRepo.findByName(n);
-            if (existing.isPresent()) {
-                return existing.get();
-            } else {
+            if (existing.isPresent()) return existing.get();
+            Publisher pub = new Publisher(n);
+            try {
+                Publisher saved = publisherRepo.save(pub);
                 stats.incrementPublishersCreated();
-                return publisherRepo.save(new Publisher(n));
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                return publisherRepo.findByName(n)
+                        .orElseThrow(() -> new RuntimeException("Error al crear editor: " + n, e));
             }
         });
     }
 
-    private Platform getOrCreatePlatform(String name, CsvImportStatisticsDto stats) {
-        return platformCache.computeIfAbsent(name, n -> {
+    private Platform getOrCreatePlatform(String name, Map<String, Platform> cache, CsvImportStatisticsDto stats) {
+        return cache.computeIfAbsent(name, n -> {
             Optional<Platform> existing = platformRepo.findByName(n);
-            if (existing.isPresent()) {
-                return existing.get();
-            } else {
+            if (existing.isPresent()) return existing.get();
+            Platform plat = new Platform(n);
+            try {
+                Platform saved = platformRepo.save(plat);
                 stats.incrementPlatformsCreated();
-                return platformRepo.save(new Platform(n));
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                return platformRepo.findByName(n)
+                        .orElseThrow(() -> new RuntimeException("Error al crear plataforma: " + n, e));
             }
         });
     }
 
-    private Category getOrCreateCategory(String name, CsvImportStatisticsDto stats) {
-        return categoryCache.computeIfAbsent(name, n -> {
+    private Category getOrCreateCategory(String name, Map<String, Category> cache, CsvImportStatisticsDto stats) {
+        return cache.computeIfAbsent(name, n -> {
             Optional<Category> existing = categoryRepo.findByName(n);
-            if (existing.isPresent()) {
-                return existing.get();
-            } else {
+            if (existing.isPresent()) return existing.get();
+            Category cat = new Category(n);
+            try {
+                Category saved = categoryRepo.save(cat);
                 stats.incrementCategoriesCreated();
-                return categoryRepo.save(new Category(n));
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                return categoryRepo.findByName(n)
+                        .orElseThrow(() -> new RuntimeException("Error al crear categoría: " + n, e));
             }
         });
     }
 
-    private Genre getOrCreateGenre(String name, CsvImportStatisticsDto stats) {
-        return genreCache.computeIfAbsent(name, n -> {
+    private Genre getOrCreateGenre(String name, Map<String, Genre> cache, CsvImportStatisticsDto stats) {
+        return cache.computeIfAbsent(name, n -> {
             Optional<Genre> existing = genreRepo.findByName(n);
-            if (existing.isPresent()) {
-                return existing.get();
-            } else {
+            if (existing.isPresent()) return existing.get();
+            Genre genre = new Genre(n);
+            try {
+                Genre saved = genreRepo.save(genre);
                 stats.incrementGenresCreated();
-                return genreRepo.save(new Genre(n));
+                return saved;
+            } catch (DataIntegrityViolationException e) {
+                return genreRepo.findByName(n)
+                        .orElseThrow(() -> new RuntimeException("Error al crear género: " + n, e));
             }
         });
     }
 
-    private void saveBatch(List<Game> gamesBatch, CsvImportStatisticsDto stats) {
-        if (gamesBatch.isEmpty()) {
-            return;
-        }
-
-        long batchStartTime = System.currentTimeMillis();
-
+    // =================================================================
+    // GUARDADO POR LOTES CON TRANSACCIÓN INDEPENDIENTE
+    // =================================================================
+    private void saveBatchInTransaction(List<Game> batch, CsvImportStatisticsDto stats) {
+        if (batch.isEmpty()) return;
         try {
-            for (Game game : gamesBatch) {
-                try {
-                    gameRepo.save(game);
-                } catch (Exception e) {
-                    System.err.printf("❌ Error guardando juego %d (%s): %s%n",
-                            game.getAppId(), game.getTitle(), e.getMessage());
-                    stats.setCreated(stats.getCreated() - 1);
-                    stats.incrementSkipped();
-                }
-            }
-
-            entityManager.flush();
-
-            long batchEndTime = System.currentTimeMillis();
-            double batchSeconds = (batchEndTime - batchStartTime) / 1000.0;
-
-            System.out.printf("✅ Batch guardado: %,d juegos | Tiempo: %.2fs | Total creados: %,d%n",
-                    gamesBatch.size(), batchSeconds, stats.getCreated());
-
+            transactionTemplate.execute(status -> {
+                gameRepo.saveAll(batch);
+                entityManager.flush();
+                entityManager.clear();
+                return null;
+            });
+            log.debug("✅ Lote guardado: {} juegos", batch.size());
         } catch (Exception e) {
-            System.err.printf("❌ Error crítico en batch: %s%n", e.getMessage());
-
-            // Fallback: guardar individualmente
-            int successfullySaved = 0;
-            for (Game game : gamesBatch) {
-                try {
-                    gameRepo.save(game);
-                    successfullySaved++;
-                } catch (Exception ex) {
-                    System.err.printf("   ✗ Error con juego %d: %s%n",
-                            game.getAppId(), ex.getMessage());
-                }
-            }
-
-            // Ajustar estadísticas
-            int failed = gamesBatch.size() - successfullySaved;
-            stats.setCreated(stats.getCreated() - failed);
-            stats.setSkipped(stats.getSkipped() + failed);
+            log.error("❌ Error guardando lote de {} juegos: {}", batch.size(), e.getMessage(), e);
+            stats.setCreated(stats.getCreated() - batch.size());
+            stats.setSkipped(stats.getSkipped() + batch.size());
         }
-    }
-
-    private void printFinalStatistics(CsvImportStatisticsDto stats, long startTime) {
-        long endTime = System.currentTimeMillis();
-        double totalSeconds = (endTime - startTime) / 1000.0;
-
-        System.out.println("\n" + "=".repeat(70));
-        System.out.println("📊 ESTADÍSTICAS FINALES DE IMPORTACIÓN");
-        System.out.println("=".repeat(70));
-        System.out.printf("Registros procesados:      %,d%n", stats.getProcessed());
-        System.out.printf("Juegos creados:            %,d%n", stats.getCreated());
-        System.out.printf("Registros saltados:        %,d%n", stats.getSkipped());
-        System.out.printf("Desarrolladores creados:   %,d%n", stats.getDevelopersCreated());
-        System.out.printf("Editores creados:          %,d%n", stats.getPublishersCreated());
-        System.out.printf("Géneros creados:           %,d%n", stats.getGenresCreated());
-        System.out.printf("Plataformas creadas:       %,d%n", stats.getPlatformsCreated());
-        System.out.printf("Categorías creadas:        %,d%n", stats.getCategoriesCreated());
-        System.out.printf("Tiempo total:              %.2f segundos%n", totalSeconds);
-
-        if (totalSeconds > 0) {
-            double gamesPerSecond = stats.getCreated() / totalSeconds;
-            System.out.printf("Velocidad:                 %.1f juegos/segundo%n", gamesPerSecond);
-        }
-
-        try {
-            long totalInDB = gameRepo.count();
-            System.out.printf("Total juegos en BD:        %,d%n", totalInDB);
-
-            if (stats.getProcessed() > 0) {
-                double successRate = (double) stats.getCreated() / stats.getProcessed() * 100;
-                System.out.printf("Tasa de éxito:            %.1f%%%n", successRate);
-            }
-        } catch (Exception e) {
-            System.err.println("⚠️  Error al contar juegos en BD: " + e.getMessage());
-        }
-
-        System.out.println("=".repeat(70));
-    }
-
-    private void clearCaches() {
-        developerCache.clear();
-        publisherCache.clear();
-        platformCache.clear();
-        categoryCache.clear();
-        genreCache.clear();
-    }
-
-    private void clearAllCaches() {
-        clearCaches();
-        entityManager.clear();
     }
 }
