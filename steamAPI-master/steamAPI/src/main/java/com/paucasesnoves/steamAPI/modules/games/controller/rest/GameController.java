@@ -27,7 +27,7 @@ public class GameController {
             @RequestParam(required = false) String developer,
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
-            @PageableDefault(size = 20, sort = "title", direction = Sort.Direction.ASC) Pageable pageable) {
+            @PageableDefault(size = 20, sort = "appId", direction = Sort.Direction.ASC) Pageable pageable) {
 
         return gameService.getGamesSummary(genre, developer, minPrice, maxPrice, pageable);
     }
