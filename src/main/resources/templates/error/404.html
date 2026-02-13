@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Página no encontrada - Steam</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Configuración de colores Steam -->
+  <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    steam: {
+                        bg: '#1b2838',
+                        card: '#2a3f5e',
+                        dark: '#0f1a24',
+                        accent: '#66c0f4',
+                        accentHover: '#4ba3d4',
+                        text: '#e9e9e9',
+                        textMuted: '#b8d0e6',
+                        border: '#3e5a77',
+                    }
+                }
+            }
+        }
+    }
+  </script>
+</head>
+<body class="bg-steam-bg font-sans text-steam-text antialiased min-h-screen flex items-center justify-center p-4">
+<div class="w-full max-w-2xl mx-auto text-center">
+  <!-- Tarjeta de error -->
+  <div class="bg-steam-card p-8 md:p-12 rounded-xl shadow-2xl border border-steam-border">
+    <!-- Icono o ilustración (opcional, puedes usar un SVG o emoji) -->
+    <div class="mb-6">
+      <span class="text-8xl block">🔍</span>
+    </div>
+
+    <!-- Código de error -->
+    <h1 class="text-7xl font-bold text-steam-accent mb-4">404</h1>
+
+    <!-- Título -->
+    <h2 class="text-3xl font-medium mb-4">Recurso no encontrado</h2>
+
+    <!-- Mensaje dinámico -->
+    <p class="text-steam-textMuted text-lg mb-8" th:text="${error} ?: 'El recurso solicitado no existe.'">
+      El recurso solicitado no existe.
+    </p>
+
+    <!-- Botón de volver -->
+    <a th:href="@{/web/games}"
+       class="inline-block bg-steam-accent hover:bg-steam-accentHover text-steam-bg font-semibold py-3 px-8 rounded-lg transition-all duration-200 border border-steam-accent hover:scale-105 shadow-lg">
+      ← Volver al listado de juegos
+    </a>
+
+  </div>
+</div>
+</body>
+</html>

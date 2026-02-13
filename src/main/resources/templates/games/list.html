@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Listado de juegos - Steam</title>
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Colores personalizados Steam -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        steam: {
+                            bg: '#1b2838',
+                            card: '#2a3f5e',
+                            dark: '#0f1a24',
+                            accent: '#66c0f4',
+                            accentHover: '#4ba3d4',
+                            green: '#4c6b22',
+                            greenHover: '#5f8030',
+                            text: '#e9e9e9',
+                            textMuted: '#b8d0e6',
+                            border: '#3e5a77',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-steam-bg font-sans text-steam-text antialiased p-4 md:p-8 min-h-screen flex flex-col items-center">
+
+<div class="w-full max-w-6xl mx-auto">
+
+    <!-- Título y enlace a búsqueda avanzada -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+        <h1 class="text-3xl md:text-4xl font-medium border-b-4 border-steam-accent pb-2 inline-block text-white shadow-text">
+            Juegos Steam
+        </h1>
+        <a th:href="@{/web/games/search}"
+           class="mt-2 md:mt-0 bg-steam-accent hover:bg-steam-accentHover text-steam-bg font-semibold py-2 px-4 rounded transition-colors duration-200 border border-steam-accent">
+            Búsqueda avanzada
+        </a>
+    </div>
+
+    <!-- Mensaje flash (opcional) -->
+    <div th:if="${successMessage}" th:text="${successMessage}" class="bg-steam-green text-white p-3 rounded-md mb-6 border-l-4 border-lime-500 font-medium shadow-lg"></div>
+
+    <!-- Tabla de juegos -->
+    <div class="overflow-x-auto rounded-xl shadow-xl border border-steam-border">
+        <table class="w-full text-sm bg-steam-card border-collapse">
+            <thead class="bg-steam-dark text-steam-textMuted uppercase text-xs tracking-wider">
+            <tr>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">ID</th>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">Título</th>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">Precio</th>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">Desarrolladores</th>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">Géneros</th>
+                <th class="p-3 text-left font-semibold border-b-2 border-steam-accent">Acciones</th>
+            </tr>
+            </thead>
+            <tbody class="divide-y divide-steam-border">
+            <tr th:each="game : ${gamesPage.content}" class="hover:bg-steam-bg/50 transition-colors">
+                <td class="p-3 text-white" th:text="${game.appId}">1</td>
+                <td class="p-3 font-medium" th:text="${game.title}">Half-Life</td>
+                <td class="p-3 font-semibold text-lime-400" th:text="${game.price}">9.99</td>
+                <td class="p-3 text-steam-textMuted" th:text="${#strings.listJoin(game.developers, ', ')}">Valve</td>
+                <td class="p-3 text-steam-textMuted" th:text="${#strings.listJoin(game.genres, ', ')}">Action</td>
+                <td class="p-3">
+                    <a th:href="@{'/web/games/' + ${game.appId}}"
+                       class="text-steam-accent hover:text-white hover:bg-steam-accent px-3 py-1 rounded border border-transparent hover:border-steam-accent transition-all duration-200 font-medium">
+                        Ver detalle
+                    </a>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Paginación con desplegable -->
+    <div th:if="${gamesPage.totalPages > 1}" class="flex justify-center items-center mt-8 gap-4">
+        <span class="text-steam-textMuted text-sm">Página</span>
+        <select id="pageSelect"
+                class="bg-steam-card border border-steam-border rounded-md px-4 py-2 text-steam-text focus:outline-none focus:border-steam-accent focus:ring-2 focus:ring-steam-accent/30 cursor-pointer"
+                th:data-base-url="@{/web/games(page=__${gamesPage.number}__, size=${gamesPage.size}, name=${name}, maxPrice=${maxPrice}, genre=${genre})}"
+                th:data-current-page="${gamesPage.number}">
+            <option th:each="i : ${#numbers.sequence(0, gamesPage.totalPages - 1)}"
+                    th:value="${i}"
+                    th:selected="${i == gamesPage.number}"
+                    th:text="${i + 1}">
+            </option>
+        </select>
+        <span class="text-steam-textMuted text-sm">
+            de <span th:text="${gamesPage.totalPages}"></span>
+        </span>
+    </div>
+
+
+</div>
+</body>
+</html>

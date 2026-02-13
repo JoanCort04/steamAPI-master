@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cerca avançada - Steam</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    steam: {
+                        bg: '#1b2838',
+                        card: '#2a3f5e',
+                        dark: '#0f1a24',
+                        accent: '#66c0f4',
+                        accentHover: '#4ba3d4',
+                        text: '#e9e9e9',
+                        textMuted: '#b8d0e6',
+                        border: '#3e5a77',
+                    }
+                }
+            }
+        }
+    }
+  </script>
+</head>
+<body class="bg-steam-bg font-sans text-steam-text antialiased p-4 md:p-8 min-h-screen flex flex-col items-center">
+
+<div class="w-full max-w-2xl mx-auto">
+  <h1 class="text-3xl md:text-4xl font-medium mb-6 border-b-4 border-steam-accent pb-2 inline-block text-white">
+    Cerca avançada de jocs
+  </h1>
+
+  <form th:action="@{/web/games/search}" th:object="${searchForm}" method="post"
+        class="bg-steam-card p-6 rounded-xl shadow-xl border border-steam-border space-y-5">
+
+    <!-- Camp Nom -->
+    <div>
+      <label class="block text-sm font-semibold uppercase tracking-wider text-steam-textMuted mb-1">
+        Nom del joc
+      </label>
+      <input type="text" th:field="*{name}"
+             class="w-full bg-steam-bg border border-steam-border rounded px-4 py-2 text-white focus:outline-none focus:border-steam-accent focus:ring-2 focus:ring-steam-accent/30"
+             placeholder="Ex. Half-Life">
+      <span th:if="${#fields.hasErrors('name')}" th:errors="*{name}"
+            class="block mt-1 text-sm text-red-400 font-medium"></span>
+    </div>
+
+    <!-- Camp Preu màxim -->
+    <div>
+      <label class="block text-sm font-semibold uppercase tracking-wider text-steam-textMuted mb-1">
+        Preu màxim (€)
+      </label>
+      <input type="number" step="0.01" th:field="*{maxPrice}"
+             class="w-full bg-steam-bg border border-steam-border rounded px-4 py-2 text-white focus:outline-none focus:border-steam-accent focus:ring-2 focus:ring-steam-accent/30"
+             placeholder="29.99">
+      <span th:if="${#fields.hasErrors('maxPrice')}" th:errors="*{maxPrice}"
+            class="block mt-1 text-sm text-red-400 font-medium"></span>
+    </div>
+
+    <!-- Camp Gènere (select simple) -->
+    <div>
+      <label class="block text-sm font-semibold uppercase tracking-wider text-steam-textMuted mb-1">
+        Gènere
+      </label>
+      <select th:field="*{genre}"
+              class="w-full bg-steam-bg border border-steam-border rounded px-4 py-2 text-white focus:outline-none focus:border-steam-accent focus:ring-2 focus:ring-steam-accent/30">
+        <option value="">Tots els gèneres</option>
+        <option th:each="g : ${allGenres}"
+                th:value="${g}"
+                th:text="${g}">Acció</option>
+      </select>
+      <span th:if="${#fields.hasErrors('genre')}" th:errors="*{genre}"
+            class="block mt-1 text-sm text-red-400 font-medium"></span>
+    </div>
+
+    <!-- Botons -->
+    <div class="flex items-center gap-4 pt-4">
+      <button type="submit"
+              class="bg-steam-accent hover:bg-steam-accentHover text-steam-bg font-semibold py-2 px-6 rounded transition-colors duration-200 border border-steam-accent">
+        Cercar
+      </button>
+      <a th:href="@{/web/games}"
+         class="bg-transparent hover:bg-steam-card text-steam-textMuted hover:text-white border border-steam-border hover:border-steam-accent font-semibold py-2 px-6 rounded transition-colors duration-200 text-center">
+        Cancel·lar
+      </a>
+    </div>
+  </form>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title th:text="${game.title} + ' - Detalle'">Detalle del juego</title>
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Colores Steam -->
+  <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    steam: {
+                        bg: '#1b2838',
+                        card: '#2a3f5e',
+                        dark: '#0f1a24',
+                        accent: '#66c0f4',
+                        accentHover: '#4ba3d4',
+                        green: '#4c6b22',
+                        greenHover: '#5f8030',
+                        text: '#e9e9e9',
+                        textMuted: '#b8d0e6',
+                        border: '#3e5a77',
+                    }
+                }
+            }
+        }
+    }
+  </script>
+</head>
+<body class="bg-steam-bg font-sans text-steam-text antialiased p-4 md:p-8 min-h-screen flex flex-col items-center">
+
+<div class="w-full max-w-6xl mx-auto">
+
+  <!-- Cabecera con navegación -->
+  <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+    <h1 class="text-3xl md:text-4xl font-medium border-b-4 border-steam-accent pb-2 inline-block text-white"
+        th:text="${game.title}">
+      Título del juego
+    </h1>
+    <a th:href="@{/web/games}"
+       class="text-steam-accent hover:text-white hover:bg-steam-accent px-4 py-2 rounded border border-steam-accent transition-colors duration-200 self-start md:self-auto">
+      ← Volver al listado
+    </a>
+  </div>
+
+  <!-- Tarjeta de detalle principal -->
+  <div class="bg-steam-card rounded-xl shadow-xl border border-steam-border overflow-hidden">
+
+    <div th:if="${game.media != null and game.media.headerImage != null}"
+         class="w-full aspect-video bg-contain bg-center bg-no-repeat bg-steam-dark"
+         th:style="'background-image: url(' + ${game.media.headerImage} + ')'">
+    </div>
+
+    <!-- Contenido -->
+    <div class="p-6 md:p-8">
+
+      <!-- Grid de información básica -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <!-- Columna izquierda -->
+        <div>
+          <p class="mb-4">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">ID Steam</span>
+            <span class="text-white text-xl font-bold" th:text="${game.appId}">12345</span>
+          </p>
+          <p class="mb-4">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Precio</span>
+            <span class="text-lime-400 text-2xl font-bold" th:text="'$' + ${game.price}">$29.99</span>
+          </p>
+          <p class="mb-4">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Fecha lanzamiento</span>
+            <span class="text-white" th:text="${#temporals.format(game.releaseDate, 'dd/MM/yyyy')}">01/01/2023</span>
+          </p>
+          <p class="mb-4">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Edad mínima</span>
+            <span class="text-white" th:text="${game.minAge} + ' años'">18 años</span>
+          </p>
+          <p class="mb-4" th:if="${game.english != null}">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Idioma inglés</span>
+            <span class="text-white" th:text="${game.english ? 'Sí' : 'No'}">Sí</span>
+          </p>
+        </div>
+
+        <!-- Columna derecha (estadísticas) -->
+        <div>
+          <p class="mb-4" th:if="${game.achievements != null}">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Logros</span>
+            <span class="text-white" th:text="${game.achievements}">100</span>
+          </p>
+          <p class="mb-4" th:if="${game.positiveRatings != null or game.negativeRatings != null}">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Valoraciones</span>
+            <span class="text-white" th:text="'Positivas: ' + ${game.positiveRatings} + ' / Negativas: ' + ${game.negativeRatings}"></span>
+          </p>
+          <p class="mb-4" th:if="${game.avgPlaytime != null}">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Tiempo medio de juego</span>
+            <span class="text-white" th:text="${game.avgPlaytime} + ' minutos'">120 min</span>
+          </p>
+          <p class="mb-4" th:if="${game.ownersMid != null}">
+            <span class="text-steam-textMuted text-sm uppercase tracking-wider block">Propietarios estimados</span>
+            <span class="text-white" th:text="${game.ownersMid} + ' millones'">10M</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Sección de listas (desarrolladores, publicadores, géneros, etiquetas, plataformas) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <!-- Desarrolladores -->
+        <div th:if="${not #lists.isEmpty(game.developers)}">
+          <h3 class="text-lg font-semibold text-steam-accent mb-2">Desarrolladores</h3>
+          <div class="flex flex-wrap gap-2">
+                            <span th:each="dev : ${game.developers}"
+                                  class="bg-steam-dark px-3 py-1 rounded-full text-sm text-steam-text"
+                                  th:text="${dev.name}">Valve</span>
+          </div>
+        </div>
+
+        <!-- Publicadores -->
+        <div th:if="${not #lists.isEmpty(game.publishers)}">
+          <h3 class="text-lg font-semibold text-steam-accent mb-2">Publicadores</h3>
+          <div class="flex flex-wrap gap-2">
+                            <span th:each="pub : ${game.publishers}"
+                                  class="bg-steam-dark px-3 py-1 rounded-full text-sm text-steam-text"
+                                  th:text="${pub.name}">Valve</span>
+          </div>
+        </div>
+
+        <!-- Géneros -->
+        <div th:if="${not #lists.isEmpty(game.genres)}">
+          <h3 class="text-lg font-semibold text-steam-accent mb-2">Géneros</h3>
+          <div class="flex flex-wrap gap-2">
+                            <span th:each="genre : ${game.genres}"
+                                  class="bg-steam-dark px-3 py-1 rounded-full text-sm text-steam-text"
+                                  th:text="${genre.name}">Acción</span>
+          </div>
+        </div>
+
+        <!-- Etiquetas (tags) -->
+        <div th:if="${not #lists.isEmpty(game.tags)}">
+          <h3 class="text-lg font-semibold text-steam-accent mb-2">Etiquetas</h3>
+          <div class="flex flex-wrap gap-2">
+                            <span th:each="tag : ${game.tags}"
+                                  class="bg-steam-dark px-3 py-1 rounded-full text-sm text-steam-text"
+                                  th:text="${tag.name}">Multijugador</span>
+          </div>
+        </div>
+
+        <!-- Plataformas -->
+        <div th:if="${not #lists.isEmpty(game.platforms)}" class="md:col-span-2">
+          <h3 class="text-lg font-semibold text-steam-accent mb-2">Plataformas</h3>
+          <div class="flex flex-wrap gap-2">
+                            <span th:each="platform : ${game.platforms}"
+                                  class="bg-steam-dark px-3 py-1 rounded-full text-sm text-steam-text"
+                                  th:text="${platform.name}">Windows</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Descripción -->
+      <div th:if="${game.description != null and game.description.detailedDescription != null}" class="mb-8">
+        <h2 class="text-xl font-semibold text-steam-accent mb-3">Descripción</h2>
+        <div class="text-steam-text leading-relaxed"
+             th:utext="${game.description.detailedDescription}">
+          Descripción detallada del juego...
+        </div>
+      </div>
+
+      <!-- Requisitos del sistema -->
+      <div th:if="${game.requirements != null}" class="mb-8">
+        <h2 class="text-xl font-semibold text-steam-accent mb-3">Requisitos del sistema</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Mínimos -->
+          <div th:if="${game.requirements.minimum != null}" class="bg-steam-dark p-4 rounded-lg">
+            <h3 class="font-semibold text-steam-accent mb-2">Mínimos</h3>
+            <div class="text-sm text-steam-text whitespace-pre-line"
+                 th:text="${game.requirements.minimum}">
+              SO: Windows 10<br>Procesador: Intel Core i5<br>Memoria: 8 GB RAM
+            </div>
+          </div>
+          <!-- Recomendados -->
+          <div th:if="${game.requirements.recommended != null}" class="bg-steam-dark p-4 rounded-lg">
+            <h3 class="font-semibold text-steam-accent mb-2">Recomendados</h3>
+            <div class="text-sm text-steam-text whitespace-pre-line"
+                 th:text="${game.requirements.recommended}">
+              SO: Windows 11<br>Procesador: Intel Core i7<br>Memoria: 16 GB RAM
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Media (capturas de pantalla) -->
+      <div th:if="${game.media != null and not #lists.isEmpty(game.media.screenshots)}" class="mb-8">
+        <h2 class="text-xl font-semibold text-steam-accent mb-3">Capturas de pantalla</h2>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div th:each="screenshot : ${game.media.screenshots}"
+               class="relative rounded-lg overflow-hidden bg-steam-dark">
+            <img th:src="${screenshot}"
+                 alt="Screenshot"
+                 class="w-full h-full object-contain bg-steam-dark hover:scale-105 transition-transform duration-200"
+                 onerror="this.onerror=null; this.src='/images/placeholder.jpg';">
+          </div>
+        </div>
+      </div>
+
+
+      <!-- Información de soporte (ajustado a GameSupportInfoDTO) -->
+      <div th:if="${game.supportInfo != null}" class="border-t border-steam-border pt-6">
+        <h2 class="text-xl font-semibold text-steam-accent mb-3">Soporte</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <!-- Sitio web principal -->
+          <div th:if="${game.supportInfo.website != null}">
+            <span class="text-steam-textMuted">Sitio web:</span>
+            <a th:href="${game.supportInfo.website}" target="_blank"
+               class="text-steam-accent hover:underline ml-2" th:text="${game.supportInfo.website}">www.ejemplo.com</a>
+          </div>
+          <!-- URL de soporte (si es diferente del sitio web) -->
+          <div th:if="${game.supportInfo.supportUrl != null and game.supportInfo.supportUrl != game.supportInfo.website}">
+            <span class="text-steam-textMuted">Soporte web:</span>
+            <a th:href="${game.supportInfo.supportUrl}" target="_blank"
+               class="text-steam-accent hover:underline ml-2" th:text="${game.supportInfo.supportUrl}">support.ejemplo.com</a>
+          </div>
+          <!-- Email de soporte -->
+          <div th:if="${game.supportInfo.supportEmail != null}">
+            <span class="text-steam-textMuted">Email:</span>
+            <a th:href="'mailto:' + ${game.supportInfo.supportEmail}"
+               class="text-steam-accent hover:underline ml-2" th:text="${game.supportInfo.supportEmail}">support@ejemplo.com</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Botón de volver al listado -->
+      <div class="mt-8 flex justify-center">
+        <a th:href="@{/web/games}"
+           class="bg-steam-accent hover:bg-steam-accentHover text-steam-bg font-semibold py-2 px-6 rounded transition-colors duration-200 border border-steam-accent">
+          Volver al listado
+        </a>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
