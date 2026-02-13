@@ -1,7 +1,9 @@
 package com.paucasesnoves.steamAPI.modules.csv.service;
 
+import com.paucasesnoves.steamAPI.exception.DatabaseNotEmptyException;
 import com.paucasesnoves.steamAPI.modules.csv.dto.CsvImportResultDto;
 import com.paucasesnoves.steamAPI.modules.csv.dto.CsvImportStatisticsDto;
+import com.paucasesnoves.steamAPI.modules.games.repository.GameRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +26,10 @@ public class CsvImportService {
     @Autowired private RequirementsCsvImporter requirementsImporter;
     @Autowired private SupportCsvImporter supportImporter;
 
-    // Rutas de los archivos CSV en classpath
+    // 🔥 Repositori per comprovar si hi ha jocs a la BD
+    @Autowired private GameRepository gameRepository;
+
+    // Rutes dels fitxers CSV al classpath
     private static final String[] CSV_FILES = {
             "data/steam.csv",
             "data/steamspy_tag_data.csv",
@@ -35,10 +40,15 @@ public class CsvImportService {
     };
 
     public CsvImportResultDto importAllCsv() {
+        // 🔥 Comprovació: si la BD ja té jocs, llencem excepció
+        if (gameRepository.count() > 0) {
+            throw new DatabaseNotEmptyException("La base de dades ja conté jocs. Importació rebutjada per evitar duplicats.");
+        }
+
         long globalStartTime = System.currentTimeMillis();
         CsvImportResultDto result = new CsvImportResultDto();
 
-        // Acumuladores
+        // Acumuladors
         int totalSkipped = 0;
         int totalGames = 0;
         int totalDevelopers = 0;
@@ -47,94 +57,94 @@ public class CsvImportService {
         int totalTags = 0;
         boolean hasErrors = false;
 
-        log.info("=== 🚀 INICIANDO IMPORTACIÓN COMPLETA DE DATOS STEAM ===");
+        log.info("=== 🚀 INICIANT IMPORTACIÓ COMPLETA DE DADES STEAM ===");
 
-        // 1. Importar juegos (steam.csv)
+        // 1. Importar jocs (steam.csv)
         try {
-            log.info("📁 [1/6] Importando juegos...");
+            log.info("📁 [1/6] Important jocs...");
             CsvImportStatisticsDto stats = executeImport(gameImporter::importCsv, CSV_FILES[0]);
             totalGames += stats.getCreated();
             totalDevelopers += stats.getDevelopersCreated();
             totalPublishers += stats.getPublishersCreated();
             totalGenres += stats.getGenresCreated();
             totalSkipped += stats.getSkipped();
-            log.info("✅ Juegos: {} creados ({} saltados)",
+            log.info("✅ Jocs: {} creats ({} saltats)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de juegos: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de jocs: {}", e.getMessage(), e);
         }
 
         // 2. Importar tags (steamspy_tag_data.csv)
         try {
-            log.info("📁 [2/6] Importando tags...");
+            log.info("📁 [2/6] Important tags...");
             CsvImportStatisticsDto stats = executeImport(tagImporter::importCsv, CSV_FILES[1]);
             totalTags += stats.getCreated();
             totalSkipped += stats.getSkipped();
-            log.info("✅ Tags: {} creados ({} saltados)",
+            log.info("✅ Tags: {} creats ({} saltats)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de tags: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de tags: {}", e.getMessage(), e);
         }
 
-        // 3. Importar descripciones (steam_description_data.csv)
+        // 3. Importar descripcions (steam_description_data.csv)
         try {
-            log.info("📁 [3/6] Importando descripciones...");
+            log.info("📁 [3/6] Important descripcions...");
             CsvImportStatisticsDto stats = executeImport(descriptionImporter::importCsv, CSV_FILES[2]);
             totalSkipped += stats.getSkipped();
-            log.info("✅ Descripciones: {} creadas ({} saltados)",
+            log.info("✅ Descripcions: {} creades ({} saltades)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de descripciones: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de descripcions: {}", e.getMessage(), e);
         }
 
         // 4. Importar media (steam_media_data.csv)
         try {
-            log.info("📁 [4/6] Importando media...");
+            log.info("📁 [4/6] Important media...");
             CsvImportStatisticsDto stats = executeImport(mediaImporter::importCsv, CSV_FILES[3]);
             totalSkipped += stats.getSkipped();
-            log.info("✅ Media: {} registros creados ({} saltados)",
+            log.info("✅ Media: {} registres creats ({} saltats)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de media: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de media: {}", e.getMessage(), e);
         }
 
-        // 5. Importar requisitos (steam_requirements_data.csv)
+        // 5. Importar requisits (steam_requirements_data.csv)
         try {
-            log.info("📁 [5/6] Importando requisitos...");
+            log.info("📁 [5/6] Important requisits...");
             CsvImportStatisticsDto stats = executeImport(requirementsImporter::importCsv, CSV_FILES[4]);
             totalSkipped += stats.getSkipped();
-            log.info("✅ Requisitos: {} registros creados ({} saltados)",
+            log.info("✅ Requisits: {} registres creats ({} saltats)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de requisitos: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de requisits: {}", e.getMessage(), e);
         }
 
-        // 6. Importar soporte (steam_support_info.csv)
+        // 6. Importar suport (steam_support_info.csv)
         try {
-            log.info("📁 [6/6] Importando soporte...");
+            log.info("📁 [6/6] Important suport...");
             CsvImportStatisticsDto stats = executeImport(supportImporter::importCsv, CSV_FILES[5]);
             totalSkipped += stats.getSkipped();
-            log.info("✅ Soporte: {} registros creados ({} saltados)",
+            log.info("✅ Suport: {} registres creats ({} saltats)",
                     String.format("%,d", stats.getCreated()),
                     String.format("%,d", stats.getSkipped()));
         } catch (Exception e) {
             hasErrors = true;
-            log.error("❌ Fallo en importación de soporte: {}", e.getMessage(), e);
+            log.error("❌ Fallada en importació de suport: {}", e.getMessage(), e);
         }
 
-        // ===== Construir resultado =====
+        // ===== Construir resultat =====
         double totalSeconds = (System.currentTimeMillis() - globalStartTime) / 1000.0;
-        result.setStatus(hasErrors ? "PARTIAL" : "OK");
+        result.setStatus(hasErrors ? "PARCIAL" : "OK");
         result.setImportedGames(totalGames);
         result.setDevelopers(totalDevelopers);
         result.setPublishers(totalPublishers);
@@ -144,30 +154,30 @@ public class CsvImportService {
         result.setDurationSeconds(totalSeconds);
 
         log.info("\n" + "=".repeat(70));
-        log.info("📊 RESUMEN GLOBAL DE IMPORTACIÓN");
+        log.info("📊 RESUM GLOBAL D'IMPORTACIÓ");
         log.info("=".repeat(70));
-        log.info("Estado:               {}", result.getStatus());
-        log.info("Juegos importados:    {}", String.format("%,d", result.getImportedGames()));
-        log.info("Desarrolladores:      {}", String.format("%,d", result.getDevelopers()));
-        log.info("Editores:             {}", String.format("%,d", result.getPublishers()));
-        log.info("Géneros:              {}", String.format("%,d", result.getGenres()));
-        log.info("Tags:                 {}", String.format("%,d", result.getTags()));
-        log.info("Líneas saltadas:      {}", String.format("%,d", result.getSkippedLines()));
-        log.info("Tiempo total:         {} segundos", String.format("%,.2f", result.getDurationSeconds()));
+        log.info("Estat:               {}", result.getStatus());
+        log.info("Jocs importats:      {}", String.format("%,d", result.getImportedGames()));
+        log.info("Desenvolupadors:     {}", String.format("%,d", result.getDevelopers()));
+        log.info("Editors:             {}", String.format("%,d", result.getPublishers()));
+        log.info("Gèneres:             {}", String.format("%,d", result.getGenres()));
+        log.info("Tags:                {}", String.format("%,d", result.getTags()));
+        log.info("Línies saltades:     {}", String.format("%,d", result.getSkippedLines()));
+        log.info("Temps total:         {} segons", String.format("%,.2f", result.getDurationSeconds()));
         log.info("=".repeat(70));
 
         return result;
     }
 
     /**
-     * Ejecuta un importador con manejo de recursos y excepciones.
+     * Executa un importador amb gestió de recursos i excepcions.
      */
     private CsvImportStatisticsDto executeImport(ThrowingFunction<InputStream, CsvImportStatisticsDto> importer,
                                                  String resourcePath) throws IOException {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
         Resource resource = resolver.getResource("classpath:" + resourcePath);
         if (!resource.exists()) {
-            throw new IOException("Archivo no encontrado: " + resourcePath);
+            throw new IOException("Fitxer no trobat: " + resourcePath);
         }
         try (InputStream is = resource.getInputStream()) {
             return importer.apply(is);
@@ -182,7 +192,7 @@ public class CsvImportService {
     }
 
     // =================================================================
-    // MÉTODOS PARA IMPORTACIÓN INDIVIDUAL (delegación)
+    // MÈTODES PER A IMPORTACIÓ INDIVIDUAL (delegació)
     // =================================================================
     public CsvImportStatisticsDto importGamesOnly() throws Exception {
         return executeImport(gameImporter::importCsv, CSV_FILES[0]);
@@ -210,7 +220,7 @@ public class CsvImportService {
 
     public String checkFiles() {
         PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-        StringBuilder sb = new StringBuilder("=== ARCHIVOS ENCONTRADOS EN /data ===\n");
+        StringBuilder sb = new StringBuilder("=== FITXERS TROBATS A /data ===\n");
         for (String path : CSV_FILES) {
             boolean exists = resolver.getResource("classpath:" + path).exists();
             sb.append(exists ? "✓ " : "✗ ").append(path).append("\n");

@@ -26,6 +26,12 @@ public class WebGameController {
     @Autowired
     private GameService gameService;
 
+    // Redirecció de l'arrel a la llista de jocs
+    @GetMapping("/")
+    public String redirectToGames() {
+        return "redirect:/web/games";
+    }
+
     // LISTADO CON FILTROS Y PAGINACIÓN
     @GetMapping
     public String listGames(
@@ -53,7 +59,7 @@ public class WebGameController {
     @GetMapping("/search")
     public String showSearchForm(Model model) {
         model.addAttribute("searchForm", new SteamGameSearchFormDTO());
-        model.addAttribute("allGenres", gameService.getAllGenreNames()); // Afegim la llista de gèneres
+        model.addAttribute("allGenres", gameService.getAllGenreNames());
         return "games/search-form";
     }
 
@@ -64,12 +70,10 @@ public class WebGameController {
                                 Model model,
                                 RedirectAttributes redirectAttributes) {
         if (result.hasErrors()) {
-            // Tornar a posar la llista de gèneres al model per al select
             model.addAttribute("allGenres", gameService.getAllGenreNames());
             return "games/search-form";
         }
 
-        // Afegir els paràmetres de cerca a la redirecció
         redirectAttributes.addAttribute("name", form.getName());
         redirectAttributes.addAttribute("maxPrice", form.getMaxPrice());
         redirectAttributes.addAttribute("genre", form.getGenre());
