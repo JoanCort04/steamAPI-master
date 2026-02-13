@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.stream.Collectors;
 
 @Service
@@ -148,8 +149,9 @@ public class GameService {
             GameMediaDTO mediaDto = new GameMediaDTO();
             mediaDto.setHeaderImage(media.getHeaderImage());
             mediaDto.setBackground(media.getBackground());
-            mediaDto.setScreenshots(media.getScreenshots());
-            mediaDto.setMovies(media.getMovies());
+            // Forzar inicialización de colecciones lazy copiándolas a nuevas listas
+            mediaDto.setScreenshots(new ArrayList<>(media.getScreenshots()));
+            mediaDto.setMovies(new ArrayList<>(media.getMovies()));
             dto.setMedia(mediaDto);
         });
 
