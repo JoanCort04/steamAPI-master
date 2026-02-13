@@ -1,6 +1,9 @@
 package com.paucasesnoves.steamAPI.modules.games.repository;
 
+import com.paucasesnoves.steamAPI.modules.games.domain.Developer;
 import com.paucasesnoves.steamAPI.modules.games.domain.Game;
+import com.paucasesnoves.steamAPI.modules.games.domain.Genre;
+import jakarta.persistence.criteria.Join;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
 
@@ -22,8 +25,9 @@ public class GameSpecification {
             if (!StringUtils.hasText(genre)) {
                 return cb.conjunction();
             }
-            return cb.isMember(genre, root.get("genres").get("name"));
-            // Ajusta segons la teua estructura: potser has de fer join
+            query.distinct(true); // Evita duplicats per múltiples gèneres
+            Join<Game, Genre> genreJoin = root.join("genres");
+            return cb.equal(genreJoin.get("name"), genre);
         };
     }
 
@@ -32,7 +36,9 @@ public class GameSpecification {
             if (!StringUtils.hasText(developer)) {
                 return cb.conjunction();
             }
-            return cb.isMember(developer, root.get("developers").get("name"));
+            query.distinct(true); // Evita duplicats per múltiples desenvolupadors
+            Join<Game, Developer> developerJoin = root.join("developers");
+            return cb.equal(developerJoin.get("name"), developer);
         };
     }
 

@@ -1,6 +1,7 @@
 package com.paucasesnoves.steamAPI.modules.web.dto;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
@@ -10,6 +11,7 @@ public class SteamGameSearchFormDTO {
     private String name;
 
     @DecimalMin(value = "0.0", inclusive = true, message = "El preu màxim ha de ser un número positiu")
+    @Digits(integer = 6, fraction = 2, message = "El preu màxim ha de tenir com a màxim 2 decimals")
     private BigDecimal maxPrice;
 
     private String genre;
