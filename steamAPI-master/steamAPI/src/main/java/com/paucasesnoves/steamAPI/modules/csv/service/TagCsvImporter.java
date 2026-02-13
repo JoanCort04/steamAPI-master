@@ -27,10 +27,6 @@ public class TagCsvImporter {
     private static final Logger log = LoggerFactory.getLogger(TagCsvImporter.class);
     private static final int BATCH_SIZE = 1000;
 
-    private static final String[][] EXPECTED_HEADER_ALTERNATIVES = {
-            {"appid", "steam_appid"}
-    };
-
     @Autowired
     private GameRepository gameRepo;
     @Autowired
@@ -43,33 +39,34 @@ public class TagCsvImporter {
         long startTime = System.currentTimeMillis();
         CsvImportStatisticsDto stats = new CsvImportStatisticsDto();
 
-        // 1. Precargar caches
+        // 1. Precargar juegos existentes
         Map<Long, Game> gameCache = CsvUtils.buildEntityCache(gameRepo.findAll(), Game::getAppId);
-        log.info("📦 Jocs precarregats: {} entitats", gameCache.size());
+        log.info("📦 Juegos precargados: {} entidades", gameCache.size());
 
+        // 2. Cache de tags existentes (por nombre)
         Map<String, Tag> tagCache = new HashMap<>();
-        for (Tag tag : tagRepo.findAll()) {
-            tagCache.put(tag.getName(), tag);
-        }
-        log.info("🏷️ Tags existents: {} noms", tagCache.size());
+        tagRepo.findAll().forEach(tag -> tagCache.put(tag.getName(), tag));
+        log.info("🏷️ Tags existentes: {} nombres", tagCache.size());
 
-        // 2. Estructures per al processament
-        List<Tag> newTagsBatch = new ArrayList<>(BATCH_SIZE);
-        Map<Long, Set<String>> gameTagsToAdd = new HashMap<>();
-
-        // 3. Lectura del CSV
+        // 3. Leer el CSV
         try (CSVReader reader = new CSVReaderBuilder(
                 new InputStreamReader(inputStream, StandardCharsets.UTF_8))
                 .withCSVParser(CsvUtils.createDefaultParser())
                 .build()) {
 
-            String[] header = reader.readNext();
-            if (!CsvUtils.isHeaderFlexibleValid(header, EXPECTED_HEADER_ALTERNATIVES)) {
-                log.error("❌ Capçalera invàlida. Primera columna ha de ser 'appid' o 'steam_appid'. Trobat: {}",
-                        header.length > 0 ? header[0] : "buit");
+            String[] header = reader.readNext(); // Primera línea: cabecera
+            if (header == null || header.length < 2) {
+                log.error("❌ Cabecera inválida o vacía");
                 return stats;
             }
-            log.info("📋 Capçalera: {} columnes (la primera és appid)", header.length);
+
+            // Los nombres de los tags están en las columnas a partir de la segunda
+            String[] tagNames = Arrays.copyOfRange(header, 1, header.length);
+            log.info("📋 Se encontraron {} columnas de tags: {}", tagNames.length, String.join(", ", tagNames));
+
+            // 4. Preparar estructuras para nuevos tags y relaciones
+            List<Tag> newTagsBatch = new ArrayList<>(BATCH_SIZE);
+            Map<Long, Set<String>> gameTagsToAdd = new HashMap<>(); // appId -> set de nombres de tags
 
             String[] line;
             int lineNumber = 1;
@@ -80,14 +77,14 @@ public class TagCsvImporter {
 
                 try {
                     if (line.length < 2) {
-                        log.warn("⚠️ Línia {}: menys de 2 columnes, s'ignora", lineNumber);
+                        log.warn("⚠️ Línea {}: menos de 2 columnas, se ignora", lineNumber);
                         stats.incrementSkipped();
                         continue;
                     }
 
                     Long appId = CsvUtils.parseLong(line[0].trim()).orElse(null);
                     if (appId == null) {
-                        log.warn("⚠️ Línia {}: appId invàlid '{}'", lineNumber, line[0]);
+                        log.warn("⚠️ Línea {}: appId inválido '{}'", lineNumber, line[0]);
                         stats.incrementSkipped();
                         continue;
                     }
@@ -95,16 +92,32 @@ public class TagCsvImporter {
                     Game game = gameCache.get(appId);
                     if (game == null) {
                         if (stats.getSkipped() % 1000 == 0) {
-                            log.debug("⏭️ Joc {} no trobat", appId);
+                            log.debug("⏭️ Juego {} no encontrado", appId);
                         }
                         stats.incrementSkipped();
                         continue;
                     }
 
-                    for (int i = 1; i < line.length; i++) {
-                        String tagName = line[i].trim();
-                        if (tagName.isEmpty()) continue;
+                    // Procesar cada columna de tag
+                    for (int i = 1; i < line.length && i - 1 < tagNames.length; i++) {
+                        String tagName = tagNames[i - 1]; // Nombre del tag desde la cabecera
+                        String valueStr = line[i].trim();
 
+                        // Si el valor es numérico y positivo, consideramos que el tag aplica
+                        if (valueStr.isEmpty() || "0".equals(valueStr)) {
+                            continue;
+                        }
+
+                        // Intentar parsear como número; si es positivo, agregar tag
+                        try {
+                            int value = Integer.parseInt(valueStr);
+                            if (value <= 0) continue;
+                        } catch (NumberFormatException e) {
+                            // Si no es número, podría ser un valor directo (raro), pero lo ignoramos
+                            continue;
+                        }
+
+                        // Buscar o crear el tag
                         Tag tag = tagCache.get(tagName);
                         if (tag == null) {
                             tag = new Tag(tagName);
@@ -113,83 +126,81 @@ public class TagCsvImporter {
                             stats.incrementTagsCreated();
                         }
 
+                        // Programar relación game-tag
                         gameTagsToAdd.computeIfAbsent(appId, k -> new HashSet<>()).add(tagName);
                     }
 
-                    // Guardar lot de tags nous
+                    // Guardar lote de tags nuevos si es necesario
                     if (newTagsBatch.size() >= BATCH_SIZE) {
                         saveNewTagsBatch(newTagsBatch, tagCache, stats);
                         newTagsBatch.clear();
                     }
 
                 } catch (Exception e) {
-                    log.warn("❌ Error línia {}: {}", lineNumber, e.getMessage());
+                    log.warn("❌ Error línea {}: {}", lineNumber, e.getMessage());
                     if (lineNumber <= 10) {
-                        log.debug("Contingut: {}", CsvUtils.truncate(String.join(" | ", line), 200));
+                        log.debug("Contenido: {}", CsvUtils.truncate(String.join(" | ", line), 200));
                     }
                     stats.incrementSkipped();
                 }
             }
 
-            // Guardar últim lot de tags nous
+            // Guardar último lote de tags nuevos
             if (!newTagsBatch.isEmpty()) {
                 saveNewTagsBatch(newTagsBatch, tagCache, stats);
             }
 
-            // 4. ASSOCIAR TAGS ALS JOCS (dins de la mateixa transacció)
+            // 5. Asociar tags a los juegos
             int relationsInserted = associateTagsToGames(gameTagsToAdd, tagCache);
-            stats.setCreated(relationsInserted);
+            stats.setCreated(relationsInserted); // usamos created para contar relaciones
 
-            // 5. Estadístiques finals
+            // 6. Estadísticas finales
             long elapsed = System.currentTimeMillis() - startTime;
             double seconds = elapsed / 1000.0;
             log.info("\n" + "=".repeat(70));
-            log.info("🏷️ IMPORTACIÓ DE TAGS FINALITZADA");
+            log.info("🏷️ IMPORTACIÓN DE TAGS FINALIZADA");
             log.info("=".repeat(70));
-            log.info("Línies processades:      {}", String.format("%,d", stats.getProcessed()));
-            log.info("Tags creats:             {}", String.format("%,d", stats.getTagsCreated()));
-            log.info("Relacions game-tag:      {}", String.format("%,d", stats.getCreated()));
-            log.info("Línies saltades:         {}", String.format("%,d", stats.getSkipped()));
-            log.info("Temps total:             {:.2f} segons", seconds);
+            log.info("Líneas procesadas:      {}", String.format("%,d", stats.getProcessed()));
+            log.info("Tags nuevos creados:    {}", String.format("%,d", stats.getTagsCreated()));
+            log.info("Relaciones game-tag:    {}", String.format("%,d", stats.getCreated()));
+            log.info("Líneas saltadas:        {}", String.format("%,d", stats.getSkipped()));
+            log.info("Tiempo total:           {:.2f} segundos", seconds);
             log.info("=".repeat(70));
 
         } catch (Exception e) {
-            log.error("❌ Error crític en importació de tags", e);
-            throw new RuntimeException("Fallada en importació de tags", e);
+            log.error("❌ Error crítico en importación de tags", e);
+            throw new RuntimeException("Falló importación de tags", e);
         }
 
         return stats;
     }
 
     /**
-     * Guarda un lot de tags nous i actualitza la cache.
-     * S'executa dins de la transacció principal.
+     * Guarda un lote de tags nuevos y actualiza la caché.
      */
     private void saveNewTagsBatch(List<Tag> batch, Map<String, Tag> tagCache, CsvImportStatisticsDto stats) {
         if (batch.isEmpty()) return;
         try {
             Iterable<Tag> saved = tagRepo.saveAll(batch);
-            // Com que estem en una transacció, no fem flush/clear encara per no perdre el context
             for (Tag savedTag : saved) {
                 tagCache.put(savedTag.getName(), savedTag);
             }
             log.debug("✅ Lote de {} tags guardado", batch.size());
         } catch (Exception e) {
-            log.error("❌ Error guardant lot de {} tags: {}", batch.size(), e.getMessage(), e);
+            log.error("❌ Error guardando lote de {} tags: {}", batch.size(), e.getMessage(), e);
             stats.setTagsCreated(stats.getTagsCreated() - batch.size());
             stats.setSkipped(stats.getSkipped() + batch.size());
         }
     }
 
     /**
-     * ASSOCIACIÓ DE TAGS ALS JOCS. Es crida dins de la mateixa transacció.
+     * Asocia los tags a los juegos (añade a la colección y guarda).
      */
     private int associateTagsToGames(Map<Long, Set<String>> gameTagsToAdd,
                                      Map<String, Tag> tagCache) {
         if (gameTagsToAdd.isEmpty()) return 0;
 
-        log.info("🔄 Associant tags a {} jocs...", gameTagsToAdd.size());
-
+        log.info("🔄 Asociando tags a {} juegos...", gameTagsToAdd.size());
         List<Game> gamesToUpdate = gameRepo.findAllById(gameTagsToAdd.keySet());
         int totalRelations = 0;
 
@@ -209,12 +220,11 @@ public class TagCsvImporter {
 
         if (!gamesToUpdate.isEmpty()) {
             gameRepo.saveAll(gamesToUpdate);
-            // Podem fer flush aquí si volem alliberar memòria, però el clear trencaria la tx
             entityManager.flush();
-            // entityManager.clear(); // NO fer clear encara, perquè després es puguin usar els jocs
+            // No hacemos clear para no perder el contexto de la transacción principal
         }
 
-        log.info("✅ {} relacions game-tag inserides via JPA", totalRelations);
+        log.info("✅ {} relaciones game-tag insertadas", totalRelations);
         return totalRelations;
     }
 }
