@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 @Service
 public class GameService {
 
-    // Repositorios principales
+    // Repositoris principals
     @Autowired
     private GameRepository gameRepository;
 
@@ -34,9 +34,9 @@ public class GameService {
     private GenreRepository genreRepo;
 
     @Autowired
-    private CategoryRepository categoryRepo; // opcional, por si se necesita
+    private CategoryRepository categoryRepo;
 
-    // Repositorios de detalle
+    // Repositoris de detall
     @Autowired
     private GameDescriptionRepository descriptionRepo;
 
@@ -54,22 +54,24 @@ public class GameService {
     private GameMapper gameMapper;
 
     // =========================================================================
-    // 1. LISTADO CON FILTROS Y PAGINACIÓN
+    // 1. LLISTAT AMB FILTRES I PAGINACIÓ (ARA AMB FILTRE PER NOM)
     // =========================================================================
     @Transactional(readOnly = true)
     public Page<GameSummaryDTO> getGamesSummary(
+            String name,                // <-- NOU PARÀMETRE
             String genre,
             String developer,
             BigDecimal minPrice,
             BigDecimal maxPrice,
             Pageable pageable) {
 
-        Specification<Game> spec = buildSpecification(genre, developer, minPrice, maxPrice);
+        Specification<Game> spec = buildSpecification(name, genre, developer, minPrice, maxPrice);
         Page<Game> gamesPage = gameRepository.findAll(spec, pageable);
         return gamesPage.map(gameMapper::toSummaryDTO);
     }
 
     private Specification<Game> buildSpecification(
+            String name,
             String genre,
             String developer,
             BigDecimal minPrice,
@@ -77,6 +79,9 @@ public class GameService {
 
         Specification<Game> spec = Specification.allOf();
 
+        if (StringUtils.hasText(name)) {
+            spec = spec.and(GameSpecification.hasName(name));   // <-- NOU
+        }
         if (StringUtils.hasText(genre)) {
             spec = spec.and(GameSpecification.hasGenre(genre));
         }
@@ -90,7 +95,7 @@ public class GameService {
     }
 
     // =========================================================================
-    // 2. DETALLE COMPLETO DE UN JUEGO
+    // 2. DETALL COMPLET D'UN JOC
     // =========================================================================
     @Transactional(readOnly = true)
     public GameDetailDTO getGameDetail(Long appId) {
@@ -100,7 +105,7 @@ public class GameService {
 
         GameDetailDTO dto = new GameDetailDTO();
 
-        // Datos básicos
+        // Dades bàsiques
         dto.setAppId(game.getAppId());
         dto.setTitle(game.getTitle());
         dto.setReleaseDate(game.getReleaseDate());
@@ -116,12 +121,12 @@ public class GameService {
         dto.setOwnersMid(game.getOwnersMid());
         dto.setPrice(game.getPrice());
 
-        // Categoría
+        // Categoria
         if (game.getCategory() != null) {
             dto.setCategory(new CategoryDTO(game.getCategory().getId(), game.getCategory().getName()));
         }
 
-        // Colecciones
+        // Col·leccions
         dto.setDevelopers(game.getDevelopers().stream()
                 .map(d -> new DeveloperDTO(d.getId(), d.getName()))
                 .collect(Collectors.toSet()));
@@ -142,7 +147,7 @@ public class GameService {
                 .map(p -> new PlatformDTO(p.getId(), p.getName()))
                 .collect(Collectors.toSet()));
 
-        // Descripción
+        // Descripció
         descriptionRepo.findByGame(game).ifPresent(desc -> {
             GameDescriptionDTO descDto = new GameDescriptionDTO();
             descDto.setDetailedDescription(desc.getDetailedDescription());
@@ -151,7 +156,7 @@ public class GameService {
             dto.setDescription(descDto);
         });
 
-        // Requisitos
+        // Requisits
         requirementsRepo.findByGame(game).ifPresent(req -> {
             GameRequirementsDTO reqDto = new GameRequirementsDTO();
             reqDto.setPcRequirements(req.getPcRequirements());
@@ -167,13 +172,12 @@ public class GameService {
             GameMediaDTO mediaDto = new GameMediaDTO();
             mediaDto.setHeaderImage(media.getHeaderImage());
             mediaDto.setBackground(media.getBackground());
-            // Forzar inicialización de colecciones lazy
             mediaDto.setScreenshots(new ArrayList<>(media.getScreenshots()));
             mediaDto.setMovies(new ArrayList<>(media.getMovies()));
             dto.setMedia(mediaDto);
         });
 
-        // Soporte
+        // Suport
         supportRepo.findByGame(game).ifPresent(support -> {
             GameSupportInfoDTO supportDto = new GameSupportInfoDTO();
             supportDto.setWebsite(support.getWebsite());
@@ -185,6 +189,9 @@ public class GameService {
         return dto;
     }
 
+    // =========================================================================
+    // 3. OBTENIR TOTS ELS GÈNERES (PER AL FORMULARI DE CERCA)
+    // =========================================================================
     @Transactional(readOnly = true)
     public List<String> getAllGenreNames() {
         return genreRepo.findAll().stream()
@@ -192,6 +199,9 @@ public class GameService {
                 .collect(Collectors.toList());
     }
 
+    // =========================================================================
+    // 4. MÈTODE ADDICIONAL: TOTS ELS JOCS EN RESUM (SI CAL)
+    // =========================================================================
     @Transactional(readOnly = true)
     public List<GameSummaryDTO> getAllGamesSummary() {
         return gameRepository.findAll().stream()

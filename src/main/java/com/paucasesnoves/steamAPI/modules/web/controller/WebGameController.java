@@ -29,6 +29,7 @@ public class WebGameController {
     // LISTADO CON FILTROS Y PAGINACIÓN
     @GetMapping
     public String listGames(
+            @RequestParam(required = false) String name,
             @RequestParam(required = false) String genre,
             @RequestParam(required = false) String developer,
             @RequestParam(required = false) BigDecimal minPrice,
@@ -37,9 +38,10 @@ public class WebGameController {
             Model model) {
 
         Page<GameSummaryDTO> gamesPage = gameService.getGamesSummary(
-                genre, developer, minPrice, maxPrice, pageable);
+                name, genre, developer, minPrice, maxPrice, pageable);
 
         model.addAttribute("gamesPage", gamesPage);
+        model.addAttribute("name", name);
         model.addAttribute("genre", genre);
         model.addAttribute("developer", developer);
         model.addAttribute("minPrice", minPrice);

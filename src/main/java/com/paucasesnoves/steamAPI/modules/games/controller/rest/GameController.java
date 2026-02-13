@@ -21,13 +21,14 @@ public class GameController {
 
     @GetMapping
     public Page<GameSummaryDTO> listGames(
+            @RequestParam(required = false) String name,
             @RequestParam(required = false) String genre,
             @RequestParam(required = false) String developer,
             @RequestParam(required = false) BigDecimal minPrice,
             @RequestParam(required = false) BigDecimal maxPrice,
             @PageableDefault(size = 20, sort = "appId", direction = Sort.Direction.ASC) Pageable pageable) {
 
-        return gameService.getGamesSummary(genre, developer, minPrice, maxPrice, pageable);
+        return gameService.getGamesSummary(name, genre, developer, minPrice, maxPrice, pageable);
     }
 
     @GetMapping("/{appId}")
