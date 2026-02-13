@@ -8,6 +8,11 @@ import java.util.Set;
 
 @Entity
 @Table(name = "games")
+@NamedEntityGraph(name = "Game.withDevelopersAndGenres",
+        attributeNodes = {
+                @NamedAttributeNode("developers"),
+                @NamedAttributeNode("genres")
+        })
 public class Game {
 
     @Id
